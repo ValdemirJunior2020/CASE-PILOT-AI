@@ -94,13 +94,15 @@ export function batchStatus(ctx,batchId){
 export function listBatches(ctx){schema(ctx);return ctx.db.prepare('SELECT id,name,createdAt,status,canceled FROM batches ORDER BY createdAt DESC').all()}
 const running=new Map();
 export function cancelBatch(ctx,batchId){schema(ctx);ctx.db.prepare('UPDATE batches SET canceled=1,status=? WHERE id=?').run('Cancel requested',batchId);return batchStatus(ctx,batchId)}
-export function processBatch(ctx,batchId,{mode='rules',model='qwen2.5:7b',selected=[]}={}){
+export function processBatch(ctx,batchId,{mode='rules',model='qwen2.5:7b',selected=[],policyId=null}={}){
  schema(ctx);const batch=batchStatus(ctx,batchId);if(!batch)throw Error('Batch not found');
  if(running.has(batchId))throw Error('This batch is already running');
  if(!['rules','auto','ollama'].includes(mode))throw Error('Invalid analysis mode');
  ctx.db.prepare('UPDATE batches SET canceled=0,status=? WHERE id=?').run('Processing',batchId);
+ if(policyId && !ctx.db.prepare('SELECT id FROM policies WHERE id=?').get(policyId))throw Error('Selected policy not found');
+ if(!policyId){ctx.db.prepare('INSERT OR IGNORE INTO policies VALUES(?,?,?,?,?,?)').run('policy-casepilot-no-policy','NO POLICY SELECTED — NOT AN APPLICABLE POLICY','0','1900-01-01',JSON.stringify([{id:'NO-POLICY',text:'No applicable policy selected. Do not reach a compliance determination.'}]),stamp());}
  const allowed=new Set(selected.length?selected:batch.cases.map(c=>c.caseId));
- const queue=batch.cases.filter(c=>allowed.has(c.caseId)&&['Pending','Failed'].includes(c.status));
+ const queue=batch.cases.filter(c=>allowed.has(c.caseId)&&(['Pending','Failed','Skipped'].includes(c.status)||(selected.includes(c.caseId)&&!!policyId&&c.status==='Completed')));
  const controller={cancel:false};running.set(batchId,controller);
  (async()=>{
   try{
@@ -108,7 +110,7 @@ export function processBatch(ctx,batchId,{mode='rules',model='qwen2.5:7b',select
     if(controller.cancel||ctx.db.prepare('SELECT canceled FROM batches WHERE id=?').get(batchId).canceled)break;
     ctx.db.prepare('UPDATE batch_cases SET status=?,error=NULL WHERE caseId=?').run('Processing',row.caseId);
     try{
-     const jobId=runInvestigation(ctx,row.caseId,{mode,model});
+     const jobId=runInvestigation(ctx,row.caseId,{mode:policyId?mode:'policy-missing',model,policyId:policyId||'policy-casepilot-no-policy'});
      let result;
      for(let i=0;i<1200;i++){await new Promise(r=>setTimeout(r,100));result=ctx.db.prepare('SELECT status FROM jobs WHERE id=?').get(jobId);if(result?.status==='Completed'||result?.status==='Failed')break}
      if(result?.status!=='Completed')throw Error('Investigation failed or timed out');
