@@ -88,7 +88,8 @@ export function batchStatus(ctx,batchId){
  schema(ctx);
  const batch=ctx.db.prepare('SELECT * FROM batches WHERE id=?').get(batchId);if(!batch)return null;
  const cases=ctx.db.prepare('SELECT bc.*,c.name, (SELECT count(*) FROM findings f WHERE f.caseId=c.id) AS findings FROM batch_cases bc JOIN cases c ON c.id=bc.caseId WHERE bc.batchId=? ORDER BY bc.rowid').all(batchId);
- return {...batch,cases,totals:{all:cases.length,completed:cases.filter(x=>x.status==='Completed').length,failed:cases.filter(x=>x.status==='Failed').length,processing:cases.filter(x=>x.status==='Processing').length,pending:cases.filter(x=>x.status==='Pending').length,skipped:cases.filter(x=>x.status==='Skipped').length,review:cases.filter(x=>x.status==='Completed'&&x.findings>0).length}};
+ const events=ctx.db.prepare('SELECT bc.caseId,bc.itinerary,e.stage,e.status,e.at,e.details FROM batch_cases bc JOIN jobs j ON j.caseId=bc.caseId JOIN events e ON e.jobId=j.id WHERE bc.batchId=? ORDER BY e.at DESC,e.rowid DESC LIMIT 100').all(batchId);
+ return {...batch,cases,events,totals:{all:cases.length,completed:cases.filter(x=>x.status==='Completed').length,failed:cases.filter(x=>x.status==='Failed').length,processing:cases.filter(x=>x.status==='Processing').length,pending:cases.filter(x=>x.status==='Pending').length,skipped:cases.filter(x=>x.status==='Skipped').length,review:cases.filter(x=>x.status==='Completed'&&x.findings>0).length}};
 }
 export function listBatches(ctx){schema(ctx);return ctx.db.prepare('SELECT id,name,createdAt,status,canceled FROM batches ORDER BY createdAt DESC').all()}
 const running=new Map();
