@@ -1,0 +1,28 @@
+name: Unpack CasePilot AI source
+on:
+  push:
+    paths:
+      - '.github/bootstrap-source.b64'
+permissions:
+  contents: write
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Verify archive and unpack all local source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -n '/^CASEPILOT_ARCHIVE_BEGIN$/,/^CASEPILOT_ARCHIVE_END$/p' .github/bootstrap-source.b64 | sed '1d;$d' | tr -d '\r\n' | base64 --decode > casepilot-source.tar.xz
+          echo "6c597c2243e7cc0b761046fd62cdf07d7c9f823523e1c2aee21719bd2f2deacc  casepilot-source.tar.xz" | sha256sum -c -
+          tar -tJf casepilot-source.tar.xz | grep -q '^./api/core.mjs$'
+          tar -xJf casepilot-source.tar.xz
+          rm -f casepilot-source.tar.xz .github/bootstrap-source.b64
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add CasePilot AI full local application source"
+          git push
