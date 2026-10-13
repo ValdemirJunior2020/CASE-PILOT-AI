@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { initialize,listCases,listPolicies,newPolicy,newCase,getCase,registerEvidence,seedDemo,runInvestigation,reviewFinding,exportJson,getEvents,MAX_BYTES } from './core.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
-const app=Fastify({ logger:{level:'warn'}, bodyLimit:MAX_BYTES*1.38+4096, requestTimeout:120000 });
+const app=Fastify({ logger:{level:'warn'}, bodyLimit:Math.ceil(MAX_BYTES*1.38+4096), requestTimeout:120000 });
 const ctx=initialize(process.env.CASEPILOT_DATA || path.resolve(here,'../data'));
 const port=Number(process.env.PORT||4317);
 function fail(reply,error){reply.code(/not found/i.test(error.message)?404:400).send({error:String(error.message).slice(0,250)});}
