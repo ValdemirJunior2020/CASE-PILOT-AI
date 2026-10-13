@@ -3,8 +3,9 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import { initialize,listCases,listPolicies,newPolicy,newCase,getCase,registerEvidence,seedDemo,runInvestigation,reviewFinding,exportJson,getEvents,MAX_BYTES } from './core.mjs';
+import {importArchive,batchStatus,listBatches,cancelBatch,processBatch,batchCsv,batchSummary} from './batches.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
-const app=Fastify({ logger:{level:'warn'}, bodyLimit:Math.ceil(MAX_BYTES*1.38+4096), requestTimeout:120000 });
+const app=Fastify({ logger:{level:'warn'}, bodyLimit:Math.ceil(32*1024*1024*1.38+4096), requestTimeout:120000 });
 const ctx=initialize(process.env.CASEPILOT_DATA || path.resolve(here,'../data'));
 const port=Number(process.env.PORT||4317);
 function fail(reply,error){reply.code(/not found/i.test(error.message)?404:400).send({error:String(error.message).slice(0,250)});}
@@ -20,6 +21,15 @@ app.get('/api/health',async()=>{
   try{const controller=new AbortController(),t=setTimeout(()=>controller.abort(),1000);try{const r=await fetch('http://127.0.0.1:11434/api/tags',{signal:controller.signal});if(r.ok){ollama=true;models=((await r.json()).models||[]).map(x=>x.name);}}finally{clearTimeout(t)}}catch{}
   return {status:'ok',app:'CasePilot AI',mode:'100% local',ollama,models,defaultModel:process.env.CASEPILOT_MODEL||'qwen2.5:7b'};
 });
+
+app.get('/api/batches',async()=>listBatches(ctx));
+app.get('/api/batches/:id',async(req,reply)=>batchStatus(ctx,req.params.id)||reply.code(404).send({error:'Batch not found'}));
+app.post('/api/batches/import',async(req,reply)=>{try{return await importArchive(ctx,req.body||{})}catch(e){return fail(reply,e)}});
+app.post('/api/batches/:id/analyze',async(req,reply)=>{try{return processBatch(ctx,req.params.id,req.body||{})}catch(e){return fail(reply,e)}});
+app.post('/api/batches/:id/cancel',async(req,reply)=>{try{return cancelBatch(ctx,req.params.id)}catch(e){return fail(reply,e)}});
+app.get('/api/batches/:id/export.csv',async(req,reply)=>{const csv=batchCsv(ctx,req.params.id);return csv===null?reply.code(404).send({error:'Batch not found'}):reply.header('Content-Type','text/csv; charset=utf-8').header('Content-Disposition','attachment; filename="casepilot-batch.csv"').send(csv)});
+app.get('/api/batches/:id/summary.json',async(req,reply)=>batchSummary(ctx,req.params.id)||reply.code(404).send({error:'Batch not found'}));
+
 app.get('/api/cases',async()=>listCases(ctx));
 app.get('/api/cases/:id',async(req,reply)=>getCase(ctx,req.params.id)||reply.code(404).send({error:'Case not found'}));
 app.post('/api/cases',async(req,reply)=>{try{return {id:newCase(ctx,req.body?.name,false)};}catch(e){return fail(reply,e);}});
