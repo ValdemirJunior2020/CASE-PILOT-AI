@@ -2,6 +2,8 @@ name: Test local CasePilot AI
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: write
@@ -33,6 +35,7 @@ jobs:
           grep -q '"status":"ok"' /tmp/casepilot-health.json || { echo 'API failed to reach healthy status'; exit 1; }
           curl --fail --silent --header 'Content-Type: application/json' --data '{}' http://127.0.0.1:4317/api/demo | grep -q 'id'
       - name: Commit resolved npm lockfile (once)
+        if: github.event_name == 'push'
         shell: bash
         run: |
           if ! git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then

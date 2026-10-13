@@ -28,7 +28,7 @@ app.get('/api/policies',async()=>listPolicies(ctx));
 app.post('/api/policies',async(req,reply)=>{try{return {id:newPolicy(ctx,req.body||{})};}catch(e){return fail(reply,e);}});
 app.post('/api/cases/:id/evidence',async(req,reply)=>{try{return registerEvidence(ctx,req.params.id,req.body||{});}catch(e){return fail(reply,e);}});
 app.post('/api/cases/:id/analyze',async(req,reply)=>{
-  try {return {jobId:runInvestigation(ctx,req.params.id,{mode:req.body?.mode||'auto',model:req.body?.model||process.env.CASEPILOT_MODEL||'qwen2.5:7b'})};}
+  try {return {jobId:runInvestigation(ctx,req.params.id,{mode:req.body?.mode||'auto',model:req.body?.model||process.env.CASEPILOT_MODEL||'qwen2.5:7b',policyId:req.body?.policyId||null})};}
   catch(e){return fail(reply,e);}
 });
 app.get('/api/jobs/:id',async(req,reply)=>{
