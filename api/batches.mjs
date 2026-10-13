@@ -75,9 +75,11 @@ export async function importArchive(ctx,{filename='cases.zip',dataBase64}){
  try{
   ctx.db.prepare('INSERT INTO batches VALUES(?,?,?,?,?,0)').run(batchId,archiveHash,path.basename(filename).slice(0,160),stamp(),'Ready');
   for(const item of cases){
+   const existingCase=item.callId&&item.center ? ctx.db.prepare('SELECT caseId FROM batch_cases WHERE callId=? AND center=? LIMIT 1').get(item.callId,item.center) : null;
    const caseId=newCase(ctx,[item.itinerary,item.agent,item.callId].filter(Boolean).join(' — ')||item.folder);
    dirs.push(path.join(ctx.baseDir,'evidence',caseId));
-   ctx.db.prepare('INSERT INTO batch_cases(batchId,caseId,folder,agent,center,itinerary,callId,status,error) VALUES(?,?,?,?,?,?,?,?,?)').run(batchId,caseId,item.folder,item.agent,item.center,item.itinerary,item.callId,'Pending',item.warning);
+   ctx.db.prepare('INSERT INTO batch_cases(batchId,caseId,folder,agent,center,itinerary,callId,status,error) VALUES(?,?,?,?,?,?,?,?,?)').run(batchId,caseId,item.folder,item.agent,item.center,item.itinerary,item.callId,existingCase?'Skipped':'Pending',existingCase?'Duplicate call ID already imported in case '+existingCase.caseId:item.warning);
+   if(existingCase)continue;
    for(const [name,data] of item.items)registerEvidence(ctx,caseId,{filename:name,mime:name.endsWith('.json')?'application/json':'text/plain',dataBase64:data.toString('base64')});
   }
   ctx.db.exec('COMMIT');
