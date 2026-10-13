@@ -34,14 +34,14 @@ jobs:
           done
           grep -q '"status":"ok"' /tmp/casepilot-health.json || { echo 'API failed to reach healthy status'; exit 1; }
           curl --fail --silent --header 'Content-Type: application/json' --data '{}' http://127.0.0.1:4317/api/demo | grep -q 'id'
-      - name: Commit resolved npm lockfile (once)
+      - name: Commit verified dependency lockfile on main
         if: github.event_name == 'push'
         shell: bash
         run: |
-          if ! git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add package-lock.json
-            git commit -m "Add npm dependency lockfile after successful verification"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Update dependency lockfile after verified build"
             git push
           fi
