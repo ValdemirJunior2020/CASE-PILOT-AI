@@ -41,3 +41,24 @@ test('completed batch generates genuine PDF and ZIP with case artifacts',async()
  const archive=await reportsZip(t.ctx,x.batchId);assert.equal(archive.subarray(0,2).toString(),'PK');
  assert.ok(archive.length>1000);
 }finally{t.close()}});
+
+test('a call ID already imported from another ZIP is skipped without mixing evidence',async()=>{const t=setup();try{
+ const first=await zip(caseEntries('A'));const a=await importArchive(t.ctx,{dataBase64:first.toString('base64')});
+ const again=await zip({...caseEntries('A'),...caseEntries('B')});
+ const b=await importArchive(t.ctx,{dataBase64:again.toString('base64')});
+ const rows=batchStatus(t.ctx,b.batchId).cases;
+ assert.equal(rows.length,2);const duplicate=rows.find(x=>x.callId==='CAA');
+ assert.equal(duplicate.status,'Skipped');
+ assert.equal(getCase(t.ctx,duplicate.caseId).evidence.length,0);
+ assert.equal(getCase(t.ctx,batchStatus(t.ctx,a.batchId).cases[0].caseId).evidence.length,6);
+ assert.equal(rows.find(x=>x.callId==='CAB').status,'Pending');
+}finally{t.close()}});
+test('unselected policy always yields Insufficient Evidence, never fake demo violations',async()=>{const t=setup();try{
+ const b=await zip(caseEntries('A'));const out=await importArchive(t.ctx,{dataBase64:b.toString('base64')});
+ processBatch(t.ctx,out.batchId,{mode:'rules'});
+ for(let i=0;i<100;i++){if(batchStatus(t.ctx,out.batchId).totals.completed)break;await new Promise(r=>setTimeout(r,25))}
+ const row=batchStatus(t.ctx,out.batchId).cases[0],details=getCase(t.ctx,row.caseId);
+ assert.equal(details.findings[0].category,'Insufficient Evidence');
+ assert.match(details.findings[0].rationale,/not been matched/i);
+ assert.equal(details.findings[0].policySectionIds[0],'NO-POLICY');
+}finally{t.close()}});
