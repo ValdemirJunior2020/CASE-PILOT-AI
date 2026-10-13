@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import { initialize,listCases,listPolicies,newPolicy,newCase,getCase,registerEvidence,seedDemo,runInvestigation,reviewFinding,exportJson,getEvents,MAX_BYTES } from './core.mjs';
+import {summaryPdf,reportsZip} from './reports.mjs';
 import {importArchive,batchStatus,listBatches,cancelBatch,processBatch,batchCsv,batchSummary} from './batches.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
 const app=Fastify({ logger:{level:'warn'}, bodyLimit:Math.ceil(32*1024*1024*1.38+4096), requestTimeout:120000 });
@@ -28,6 +29,8 @@ app.post('/api/batches/import',async(req,reply)=>{try{return await importArchive
 app.post('/api/batches/:id/analyze',async(req,reply)=>{try{return processBatch(ctx,req.params.id,req.body||{})}catch(e){return fail(reply,e)}});
 app.post('/api/batches/:id/cancel',async(req,reply)=>{try{return cancelBatch(ctx,req.params.id)}catch(e){return fail(reply,e)}});
 app.get('/api/batches/:id/export.csv',async(req,reply)=>{const csv=batchCsv(ctx,req.params.id);return csv===null?reply.code(404).send({error:'Batch not found'}):reply.header('Content-Type','text/csv; charset=utf-8').header('Content-Disposition','attachment; filename="casepilot-batch.csv"').send(csv)});
+app.get('/api/batches/:id/summary.pdf',async(req,reply)=>{const pdf=await summaryPdf(ctx,req.params.id);if(!pdf)return reply.code(404).send({error:'Batch not found'});return reply.header('Content-Type','application/pdf').header('Content-Disposition','attachment; filename="casepilot-batch-summary.pdf"').send(pdf)});
+app.get('/api/batches/:id/reports.zip',async(req,reply)=>{const zip=await reportsZip(ctx,req.params.id);if(!zip)return reply.code(404).send({error:'Batch not found'});return reply.header('Content-Type','application/zip').header('Content-Disposition','attachment; filename="casepilot-batch-reports.zip"').send(zip)});
 app.get('/api/batches/:id/summary.json',async(req,reply)=>batchSummary(ctx,req.params.id)||reply.code(404).send({error:'Batch not found'}));
 
 app.get('/api/cases',async()=>listCases(ctx));
