@@ -174,29 +174,30 @@ export async function ollamaCandidates(spans,sections,{model='qwen2.5:7b',host='
     const out=await response.json(); return parse(out.response,{}).findings;
   } finally { clearTimeout(timer); }
 }
-export function runInvestigation(ctx,caseId,{mode='auto',model='qwen2.5:7b',onEvent=()=>{}}={}) {
+export function runInvestigation(ctx,caseId,{mode='auto',model='qwen2.5:7b',policyId=null,onEvent=()=>{}}={}) {
   if(!['auto','ollama','rules'].includes(mode)) throw Error('Invalid provider mode.');
   const c=getCase(ctx,caseId); if(!c) throw Error('Case not found.');
+  // A synchronous SQLite guard serializes analysis requests even when their asynchronous AI work overlaps.
+  if(ctx.db.prepare("SELECT 1 FROM jobs WHERE caseId=? AND status='Processing' LIMIT 1").get(caseId)) throw Error('An investigation is already processing for this case.');
+  if(ctx.db.prepare('SELECT 1 FROM reviews r JOIN findings f ON f.id=r.findingId WHERE f.caseId=? LIMIT 1').get(caseId)) throw Error('This case has reviewed findings; clone it before reanalysis.');
   const jobId=id(); ctx.db.prepare('INSERT INTO jobs(id,caseId,status,provider,startedAt) VALUES (?,?,?,?,?)').run(jobId,caseId,'Processing',mode,now());
   const emit=(stage,status,details='')=>onEvent(pushEvent(ctx,jobId,stage,status,details));
   emit('Start','Processing','Investigation created');
   const execute=async()=>{
   try {
-    const spans=c.spans; const policy=listPolicies(ctx).filter(p=>p.effectiveDate<=new Date().toISOString().slice(0,10)).sort((a,b)=>b.effectiveDate.localeCompare(a.effectiveDate))[0];
+    const spans=c.spans;
+    const times=spans.map(s=>dateMatch(s.excerpt)).filter(x=>x!=='Time unknown').sort();
+    const caseDate=times[0]?.slice(0,10)||c.createdAt.slice(0,10);
+    const policies=listPolicies(ctx).filter(p=>p.effectiveDate<=caseDate);
+    const policy=policyId ? policies.find(p=>p.id===policyId) : policies.length===1 ? policies[0] : null;
+    if(!policy && policies.length>1 && !policyId) throw Error('Multiple policies apply by date. Select an explicit policyId before investigation.');
     if(!policy) throw Error('No effective policy version.');
     if(!spans.length) throw Error('No extractable evidence. Add text, use a local extractor, or supply a clearly labeled manual description.');
     emit('Evidence','Completed',`${spans.length} extracted evidence spans`);
-    if(ctx.db.prepare('SELECT COUNT(*) AS n FROM reviews r JOIN findings f ON f.id=r.findingId WHERE f.caseId=?').get(caseId).n) throw Error('This case already has a human review; clone into a new case to preserve audit history.');
-    ctx.db.prepare('DELETE FROM findings WHERE caseId=?').run(caseId);
-    ctx.db.prepare('DELETE FROM timeline WHERE caseId=?').run(caseId);
-    ctx.db.prepare('DELETE FROM observations WHERE caseId=?').run(caseId);
-    const observations=[];
-    spans.slice(0,200).forEach((s,index)=>{
-      const oid=id(); observations.push({id:oid,statement:s.excerpt,evidenceSpanIds:[s.id],uncertainty:'Extracted source text; source credibility not independently established.'});
-      ctx.db.prepare('INSERT INTO observations VALUES (?,?,?,?,?)').run(oid,caseId,s.excerpt,stringify([s.id]),'Source-asserted fact');
-      ctx.db.prepare('INSERT INTO timeline VALUES (?,?,?,?,?)').run(id(),caseId,index,dateMatch(s.excerpt),stringify([oid]));
-    });
-    emit('Timeline','Completed',`${observations.length} source-linked statements`);
+    const observations=spans.slice(0,200).map(s=>({id:id(),statement:s.excerpt,evidenceSpanIds:[s.id],uncertainty:'Extracted source text; source credibility not independently established.'}));
+    const timeline=observations.map((o,index)=>({id:id(),observationId:o.id,time:dateMatch(o.statement),originalIndex:index}));
+    timeline.sort((a,b)=>a.time==='Time unknown'&&b.time!=='Time unknown'?1:b.time==='Time unknown'&&a.time!=='Time unknown'?-1:a.time==='Time unknown'?a.originalIndex-b.originalIndex:a.time.localeCompare(b.time)||a.originalIndex-b.originalIndex);
+    emit('Timeline','Completed',`${observations.length} source-linked statements prepared in chronological order`);
     let raw=[],provider='Deterministic local rules';
     if(mode!=='rules') {
       emit('Local AI','Processing',`Contacting local Ollama model ${model}`);
@@ -205,11 +206,22 @@ export function runInvestigation(ctx,caseId,{mode='auto',model='qwen2.5:7b',onEv
     }
     if(!Array.isArray(raw)||!raw.length) { raw=deterministicCandidates(spans,policy.id); emit('Local rules','Completed','Rule-based assessment (not AI)'); }
     const validated=verifyCandidates(raw,spans,policy.sections);
-    for(const f of validated) {
-      const oid=observations.filter(o=>f.evidenceSpanIds.some(x=>o.evidenceSpanIds.includes(x))).map(o=>o.id);
-      ctx.db.prepare('INSERT INTO findings VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(id(),caseId,f.title,f.category,policy.id,stringify(f.policySectionIds),stringify(oid),stringify(f.evidenceSpanIds),f.rationale,f.uncertainty,f.coaching,'Pending human review');
-    }
-    ctx.db.prepare('UPDATE cases SET status=? WHERE id=?').run('Needs review',caseId);
+    // Commit the entire investigation atomically, never leaving a half-rebuilt case.
+    ctx.db.exec('BEGIN IMMEDIATE');
+    try {
+      if(ctx.db.prepare('SELECT 1 FROM reviews r JOIN findings f ON f.id=r.findingId WHERE f.caseId=? LIMIT 1').get(caseId)) throw Error('Reviewed findings cannot be overwritten.');
+      ctx.db.prepare('DELETE FROM findings WHERE caseId=?').run(caseId);
+      ctx.db.prepare('DELETE FROM timeline WHERE caseId=?').run(caseId);
+      ctx.db.prepare('DELETE FROM observations WHERE caseId=?').run(caseId);
+      for(const o of observations) ctx.db.prepare('INSERT INTO observations VALUES (?,?,?,?,?)').run(o.id,caseId,o.statement,stringify(o.evidenceSpanIds),o.uncertainty);
+      for(const [index,t] of timeline.entries()) ctx.db.prepare('INSERT INTO timeline VALUES (?,?,?,?,?)').run(t.id,caseId,index,t.time,stringify([t.observationId]));
+      for(const f of validated) {
+        const oid=observations.filter(o=>f.evidenceSpanIds.some(x=>o.evidenceSpanIds.includes(x))).map(o=>o.id);
+        ctx.db.prepare('INSERT INTO findings VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(id(),caseId,f.title,f.category,policy.id,stringify(f.policySectionIds),stringify(oid),stringify(f.evidenceSpanIds),f.rationale,f.uncertainty,f.coaching,'Pending human review');
+      }
+      ctx.db.prepare('UPDATE cases SET status=? WHERE id=?').run('Needs review',caseId);
+      ctx.db.exec('COMMIT');
+    } catch(e) { ctx.db.exec('ROLLBACK'); throw e; }
     ctx.db.prepare('UPDATE jobs SET status=?,provider=?,finishedAt=? WHERE id=?').run('Completed',provider,now(),jobId);
     emit('Verification','Completed',`${validated.length} checked findings; ${provider}`); emit('Done','Completed','Human approval required');
   } catch(e) { ctx.db.prepare('UPDATE jobs SET status=?,errorCode=?,finishedAt=? WHERE id=?').run('Failed','INVESTIGATION_FAILED',now(),jobId); emit('Failure','Failed',String(e.message).slice(0,300)); }
@@ -219,6 +231,7 @@ export function runInvestigation(ctx,caseId,{mode='auto',model='qwen2.5:7b',onEv
 }
 export function reviewFinding(ctx,caseId,findingId,{reviewer,decision,reason}) {
   if(!['Approve','Reject','Revise'].includes(decision) || !reviewer?.trim() || !reason?.trim()) throw Error('Reviewer, decision and reason required.');
+  if(ctx.db.prepare("SELECT 1 FROM jobs WHERE caseId=? AND status='Processing' LIMIT 1").get(caseId)) throw Error('Cannot review while an investigation is processing.');
   const f=ctx.db.prepare('SELECT id FROM findings WHERE id=? AND caseId=?').get(findingId,caseId); if(!f) throw Error('Finding not found.');
   const rid=id(); ctx.db.prepare('INSERT INTO reviews VALUES (?,?,?,?,?,?)').run(rid,findingId,reviewer.slice(0,80),decision,reason.slice(0,1000),now());
   ctx.db.prepare('UPDATE findings SET status=? WHERE id=?').run(decision==='Approve'?'Approved':decision==='Reject'?'Rejected':'Revision requested',findingId);
