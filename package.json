@@ -20,9 +20,7 @@
     "@fastify/static": "^8.2.0",
     "fastify": "^5.2.0",
     "pdfkit": "^0.17.1",
-    "yauzl": "^3.2.0"
-  },
-  "devDependencies": {
+    "yauzl": "^3.2.0",
     "yazl": "^3.3.1"
   }
 }
