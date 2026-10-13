@@ -25,12 +25,12 @@ jobs:
           set -euo pipefail
           node --experimental-sqlite api/server.mjs >/tmp/casepilot-api.log 2>&1 &
           pid=$!
-          trap 'kill "$pid" || true' EXIT
+          trap 'cat /tmp/casepilot-api.log || true; kill "$pid" 2>/dev/null || true' EXIT
           for i in {1..20}; do
             if curl --fail --silent http://127.0.0.1:4317/api/health > /tmp/casepilot-health.json; then break; fi
             sleep 1
           done
-          grep -q '"status":"ok"' /tmp/casepilot-health.json
+          grep -q '"status":"ok"' /tmp/casepilot-health.json || { echo 'API failed to reach healthy status'; exit 1; }
           curl --fail --silent --header 'Content-Type: application/json' --data '{}' http://127.0.0.1:4317/api/demo | grep -q 'id'
       - name: Commit resolved npm lockfile (once)
         shell: bash
