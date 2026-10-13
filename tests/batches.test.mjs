@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import yazl from 'yazl';
+import {summaryPdf,reportsZip} from '../api/reports.mjs';
 import {initialize,getCase} from '../api/core.mjs';
 import {importArchive,batchStatus,processBatch,cancelBatch,batchCsv,batchSummary} from '../api/batches.mjs';
 const setup=()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cp-batch-'));const ctx=initialize(dir);return {ctx,close(){ctx.db.close();fs.rmSync(dir,{recursive:true,force:true})}}};
@@ -30,3 +31,13 @@ test('missing files and malformed JSON do not mix evidence',async()=>{const t=se
 test('reject path traversal, disallowed nested ZIP and ZIP bombs without partial import',async()=>{const t=setup();try{for(const entries of [{'A/unexpected.exe':'bad'},{'A/B/TRANSCRIPT.txt':'bad'},{'A/archive.zip':'PK'}]){const b=await zip(entries);await assert.rejects(()=>importArchive(t.ctx,{dataBase64:b.toString('base64')}),/ZIP rejected/)}const bomb=await zip({'A/TRANSCRIPT.txt':'0'.repeat(200000)});await assert.rejects(()=>importArchive(t.ctx,{dataBase64:bomb.toString('base64')}),/Compression ratio/);assert.equal(t.ctx.db.prepare('SELECT count(*) n FROM cases').get().n,0);}finally{t.close()}});
 test('bad archive does not create any SQLite case',async()=>{const t=setup();try{await assert.rejects(()=>importArchive(t.ctx,{dataBase64:Buffer.from('garbage').toString('base64')}));assert.equal(t.ctx.db.prepare('SELECT count(*) n FROM cases').get().n,0);}finally{t.close()}});
 test('batch queue supports cancellation and CSV exports',async()=>{const t=setup();try{const b=await zip(caseEntries('A'));const out=await importArchive(t.ctx,{dataBase64:b.toString('base64')});assert.match(batchCsv(t.ctx,out.batchId),/callId/);assert.equal(batchSummary(t.ctx,out.batchId).results.length,0);processBatch(t.ctx,out.batchId,{mode:'rules'});for(let i=0;i<100;i++){if(batchStatus(t.ctx,out.batchId).totals.completed)break;await new Promise(r=>setTimeout(r,25))}assert.equal(batchStatus(t.ctx,out.batchId).totals.completed,1);assert.ok(batchSummary(t.ctx,out.batchId).results[0].findings.length);cancelBatch(t.ctx,out.batchId);assert.equal(batchStatus(t.ctx,out.batchId).canceled,1);}finally{t.close()}});
+
+test('completed batch generates genuine PDF and ZIP with case artifacts',async()=>{const t=setup();try{
+ const b=await zip(caseEntries('A'));const x=await importArchive(t.ctx,{dataBase64:b.toString('base64')});
+ processBatch(t.ctx,x.batchId,{mode:'rules'});
+ for(let i=0;i<100;i++){if(batchStatus(t.ctx,x.batchId).totals.completed)break;await new Promise(r=>setTimeout(r,25))}
+ assert.equal(batchStatus(t.ctx,x.batchId).totals.completed,1);
+ const pdf=await summaryPdf(t.ctx,x.batchId);assert.equal(pdf.subarray(0,5).toString(),'%PDF-');
+ const archive=await reportsZip(t.ctx,x.batchId);assert.equal(archive.subarray(0,2).toString(),'PK');
+ assert.ok(archive.length>1000);
+}finally{t.close()}});
