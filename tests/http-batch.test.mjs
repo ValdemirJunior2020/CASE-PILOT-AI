@@ -34,5 +34,14 @@ test('HTTP end-to-end ZIP upload, analyze, per-case citations, batch exports',as
   assert.ok(b.events?.length>0);
   for(const row of b.cases){const item=await api('/cases/'+row.caseId);assert.equal(item.evidence.length,6);assert.ok(item.findings.length);assert.ok(item.findings[0].evidenceSpanIds.every(x=>item.spans.some(y=>y.id===x)))}
   for(const suffix of ['export.csv','summary.pdf','reports.zip']){const res=await fetch(root+'/api/batches/'+created.batchId+'/'+suffix);assert.ok(res.ok,suffix);const bytes=Buffer.from(await res.arrayBuffer());assert.ok(bytes.length>100,suffix);if(suffix.endsWith('.pdf'))assert.equal(bytes.subarray(0,5).toString(),'%PDF-');if(suffix.endsWith('.zip'))assert.equal(bytes.subarray(0,2).toString(),'PK')}
- }finally{child.kill();fs.rmSync(data,{recursive:true,force:true})}
+ }finally{
+  // Windows keeps SQLite locked until the child process has fully exited.
+  if(child.exitCode===null && child.signalCode===null){
+   const closed=new Promise(resolve=>child.once('close',resolve));
+   child.kill();
+   await closed;
+  }
+  // Antivirus/indexers can briefly retain Windows handles after process exit.
+  fs.rmSync(data,{recursive:true,force:true,maxRetries:15,retryDelay:200});
+ }
 });
