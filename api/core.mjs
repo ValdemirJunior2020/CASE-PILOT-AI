@@ -175,7 +175,7 @@ export async function ollamaCandidates(spans,sections,{model='qwen2.5:7b',host='
   } finally { clearTimeout(timer); }
 }
 export function runInvestigation(ctx,caseId,{mode='auto',model='qwen2.5:7b',policyId=null,onEvent=()=>{}}={}) {
-  if(!['auto','ollama','rules'].includes(mode)) throw Error('Invalid provider mode.');
+  if(!['auto','ollama','rules','policy-missing'].includes(mode)) throw Error('Invalid provider mode.');
   const c=getCase(ctx,caseId); if(!c) throw Error('Case not found.');
   // A synchronous SQLite guard serializes analysis requests even when their asynchronous AI work overlaps.
   if(ctx.db.prepare("SELECT 1 FROM jobs WHERE caseId=? AND status='Processing' LIMIT 1").get(caseId)) throw Error('An investigation is already processing for this case.');
@@ -199,10 +199,15 @@ export function runInvestigation(ctx,caseId,{mode='auto',model='qwen2.5:7b',poli
     timeline.sort((a,b)=>a.time==='Time unknown'&&b.time!=='Time unknown'?1:b.time==='Time unknown'&&a.time!=='Time unknown'?-1:a.time==='Time unknown'?a.originalIndex-b.originalIndex:a.time.localeCompare(b.time)||a.originalIndex-b.originalIndex);
     emit('Timeline','Completed',`${observations.length} source-linked statements prepared in chronological order`);
     let raw=[],provider='Deterministic local rules';
-    if(mode!=='rules') {
+    if(mode!=='rules'&&mode!=='policy-missing') {
       emit('Local AI','Processing',`Contacting local Ollama model ${model}`);
       try { raw=await ollamaCandidates(spans,policy.sections,{model}); provider='Ollama '+model; emit('Local AI','Completed','Local model returned candidate findings'); }
       catch(e) { if(mode==='ollama') throw e; emit('Local AI','Skipped','Ollama unavailable; explicitly switching to local rules'); }
+    }
+    if(mode==='policy-missing') {
+      raw=[{title:'Policy not selected — compliance cannot be determined',category:'Insufficient Evidence',policySectionIds:['NO-POLICY'],evidenceSpanIds:spans.slice(0,2).map(x=>x.id),rationale:'The supplied records have not been matched to an authorized, applicable policy. No compliance verdict is possible.',uncertainty:'A relevant versioned policy must be selected by a human before compliance analysis.',coaching:'Select the applicable policy, confirm scope and effective date, and rerun the investigation.'}];
+      provider='No-policy safeguard (not AI)';
+      emit('Policy','Skipped','No applicable policy selected; evidence preserved without compliance verdict');
     }
     if(!Array.isArray(raw)||!raw.length) { raw=deterministicCandidates(spans,policy.id); emit('Local rules','Completed','Rule-based assessment (not AI)'); }
     const validated=verifyCandidates(raw,spans,policy.sections);
