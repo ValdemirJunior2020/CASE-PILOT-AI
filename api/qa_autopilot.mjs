@@ -35,8 +35,8 @@ export function registerQaAutopilot(app,ctx){
  ctx.db.exec('CREATE TABLE IF NOT EXISTS qa_autopilot (folder TEXT PRIMARY KEY,hash TEXT,caseId TEXT,status TEXT,center TEXT,agent TEXT,callId TEXT,itinerary TEXT,updatedAt TEXT,result TEXT,error TEXT)');
  const candidates=[process.env.QA_CALLS_OUTPUT,DEFAULT_ROOT,path.join(process.env.USERPROFILE||'', 'Downloads','QA-SYSTEM','NOVO','novo-novo','data','calls'),path.join(process.env.HOMEDRIVE||'C:',process.env.HOMEPATH||'\\Users\\nobody','Downloads','QA-SYSTEM','NOVO','novo-novo','data','calls')].filter(Boolean);
  const root=candidates.find(p=>fs.existsSync(p)&&fs.statSync(p).isDirectory())||candidates[0];const policyRoot=path.resolve(process.cwd(),'local-qa');const model=process.env.CASEPILOT_MODEL||'qwen2.5:7b';
- let busy=false,lastScan=null,active=null,lastError=null;
- async function scan(){if(busy)return;busy=true;lastScan=now();try{for(const dir of findCases(root)){
+ let busy=false,lastScan=null,active=null,lastError=null,scanStarted=null,scanFinished=null,discovered=0;
+ async function scan(){if(busy)return;busy=true;scanStarted=now();lastScan=scanStarted;try{const dirs=findCases(root);discovered=dirs.length;for(const dir of dirs){
  const snap=snapshot(dir);if(!snap)continue;const previous=ctx.db.prepare('SELECT * FROM qa_autopilot WHERE folder=?').get(dir);
  if(previous?.hash===snap.hash&&['READY_FOR_HUMAN_REVIEW','NEEDS_INVESTIGATION','SKIP_UNSCOREABLE'].includes(previous.status))continue;
  let meta;try{meta=JSON.parse(readFile(path.join(dir,'metadata.json')))}catch{continue}
@@ -53,10 +53,10 @@ export function registerQaAutopilot(app,ctx){
  ctx.db.prepare('UPDATE qa_autopilot SET status=?,result=?,error=NULL,updatedAt=? WHERE folder=?').run(proposal.status,JSON.stringify(proposal),now(),dir)}
  catch(e){ctx.db.prepare('UPDATE qa_autopilot SET status=?,error=?,updatedAt=? WHERE folder=?').run('OLLAMA_UNAVAILABLE',String(e.message).slice(0,350),now(),dir)}
  active=null;
- }}catch(e){lastError=String(e)}finally{busy=false}}
- app.get('/api/qa-autopilot/status',async()=>({root,rootExists:fs.existsSync(root),model,active,lastScan,lastError,policyFiles:Object.fromEntries(Object.entries(rules(policyRoot)).map(([k,v])=>[k,!!v])),counts:ctx.db.prepare('SELECT status,COUNT(*) AS n FROM qa_autopilot GROUP BY status').all()}));
+ }}catch(e){lastError=String(e)}finally{busy=false;scanFinished=now();active=null}}
+ app.get('/api/qa-autopilot/status',async()=>({root,rootExists:fs.existsSync(root),model,active,lastScan,lastError,busy,scanStarted,scanFinished,discovered,policyFiles:Object.fromEntries(Object.entries(rules(policyRoot)).map(([k,v])=>[k,!!v])),counts:ctx.db.prepare('SELECT status,COUNT(*) AS n FROM qa_autopilot GROUP BY status').all()}));
  app.get('/api/qa-autopilot/calls',async()=>ctx.db.prepare('SELECT folder,caseId,status,center,agent,callId,itinerary,updatedAt,error,result FROM qa_autopilot ORDER BY updatedAt DESC LIMIT 300').all().map(r=>({...r,result:r.result?JSON.parse(r.result):null})));
  app.post('/api/qa-autopilot/retry/:id',async(req,reply)=>{const row=ctx.db.prepare('SELECT folder FROM qa_autopilot WHERE callId=?').get(req.params.id);if(!row)return reply.code(404).send({error:'Call not found'});ctx.db.prepare("UPDATE qa_autopilot SET hash='RETRY' WHERE folder=?").run(row.folder);void scan();return {queued:true}});
- app.post('/api/qa-autopilot/rescan',async()=>{void scan();return {started:true}});
+ app.post('/api/qa-autopilot/rescan',async()=>{if(busy)return {started:false,busy:true,discovered};void scan();return {started:true,busy:true,discovered}});
  const loop=setInterval(()=>void scan(),30000);loop.unref();setTimeout(()=>void scan(),1200).unref();
 }
