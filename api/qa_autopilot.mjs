@@ -37,7 +37,7 @@ export function registerQaAutopilot(app,ctx){
  let busy=false,lastScan=null,active=null,lastError=null;
  async function scan(){if(busy)return;busy=true;lastScan=now();try{for(const dir of findCases(root)){
  const snap=snapshot(dir);if(!snap)continue;const previous=ctx.db.prepare('SELECT * FROM qa_autopilot WHERE folder=?').get(dir);
- if(previous?.hash===snap.hash&&['READY_FOR_HUMAN_REVIEW','NEEDS_INVESTIGATION','SKIP_UNSCOREABLE','AWAITING_POLICIES','OLLAMA_UNAVAILABLE'].includes(previous.status))continue;
+ if(previous?.hash===snap.hash&&['READY_FOR_HUMAN_REVIEW','NEEDS_INVESTIGATION','SKIP_UNSCOREABLE'].includes(previous.status))continue;
  let meta;try{meta=JSON.parse(readFile(path.join(dir,'metadata.json')))}catch{continue}
  const id=String(meta.call_id||'').trim(),center=String(meta.center||'').trim(),agent=String(meta.agent_name||'').trim(),itinerary=String(meta.itinerary_number||'').trim();
  if(!id||!center)continue;
