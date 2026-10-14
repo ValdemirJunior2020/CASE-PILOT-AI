@@ -6,3 +6,6 @@ data/
 *.log
 .DS_Store
 *.zip
+
+# Private company rules and call evidence: keep local, never publish
+local-qa/
