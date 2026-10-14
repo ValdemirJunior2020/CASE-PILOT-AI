@@ -16,6 +16,14 @@ CasePilot converts synthetic or explicitly authorized customer-service records i
 
 For local generative AI, install [Ollama](https://ollama.com/), execute `ollama pull qwen2.5:7b`, and start Ollama. Then choose **Ollama only**. Ollama and Qwen2.5 7B model files are downloaded once for local use. The model card lists Apache-2.0 for the chosen 7B Instruct weights; verify the specific installed quantization and distribution license independently. An alternative verified local model can be entered in the UI. **No automatic cloud fallback.**
 
+## Automatic QA Autopilot (local-only)
+
+The sidebar includes **QA Autopilot**, a read-only automatic review queue. When the Node backend starts, it watches `C:\\Users\\nobody\\Downloads\\QA-SYSTEM\\NOVO\\novo-novo\\data\\calls` every 30 seconds, waits for stable completed files, preserves the imported evidence, and asks the installed Ollama model for conservative nine-category QA proposals. No Upload or Analyze click is needed. Override the source path with `QA_CALLS_OUTPUT` and the model with `CASEPILOT_MODEL`.
+
+**Important: your company Matrix and QA calibration files are confidential and are intentionally not stored in this public GitHub repository.** Before CasePilot can score calls, the private local folder `local-qa/policies/` must contain UTF-8 files named `master_prompt.txt`, `voice_matrix.txt`, and `qa_rubric.txt`. Optional dated updates belong in `process_updates.txt`. The dashboard shows which files are missing. If they are unavailable, calls display `AWAITING_POLICIES` and no score is invented. Restart or wait for the next 30-second scan after adding them. The ZIP patch prepared earlier includes converted text versions of the three provided policy sources and can be used as an offline source, without uploading private documents to GitHub.
+
+This version **does not automatically write to Daily-Findings or Scores**. Ollama outputs are draft recommendations requiring evidence verification; the app does not make booking changes. No paid AI service or OpenAI API key is used. GitHub CI tests the build but does not prove a successful Windows/Ollama production integration.
+
 ## Available now
 
 - React/TypeScript frontend with dashboard, intake, timeline, policy library, analytics, AI operations, reviews and exports.
