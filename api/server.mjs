@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import {buildTodayQaWorkbook} from './qa_excel.mjs';
 import {registerQaAutopilot} from './qa_autopilot.mjs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -24,6 +25,7 @@ app.get('/api/health',async()=>{
   return {status:'ok',app:'CasePilot AI',mode:'100% local',ollama,models,defaultModel:process.env.CASEPILOT_MODEL||'qwen2.5:7b'};
 });
 
+app.get('/api/qa-results/today.xlsx',async(req,reply)=>{try{const out=await buildTodayQaWorkbook(ctx);return reply.header('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').header('Content-Disposition','attachment; filename="CasePilot-QA-'+out.date+'.xlsx"').header('X-QA-Count',String(out.count)).send(Buffer.from(out.buffer))}catch(e){return fail(reply,e)}});
 app.get('/api/batches',async()=>listBatches(ctx));
 app.get('/api/batches/:id',async(req,reply)=>batchStatus(ctx,req.params.id)||reply.code(404).send({error:'Batch not found'}));
 app.post('/api/batches/import',async(req,reply)=>{try{return await importArchive(ctx,req.body||{})}catch(e){return fail(reply,e)}});
