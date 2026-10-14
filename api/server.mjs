@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import {registerQaAutopilot} from './qa_autopilot.mjs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -80,4 +81,5 @@ if(fs.existsSync(dist)) {
   const {default:staticPlugin}=await import('@fastify/static');await app.register(staticPlugin,{root:dist,prefix:'/'});
   app.setNotFoundHandler((req,reply)=>req.url.startsWith('/api/')?reply.code(404).send({error:'Not found'}):reply.type('text/html').send(fs.readFileSync(path.join(dist,'index.html'))));
 } else app.get('/',async(_,reply)=>reply.type('text/html').send('<p>CasePilot API is running. Use START.bat to launch the React UI, or run npm run dev:ui.</p>'));
+registerQaAutopilot(app,ctx);
 try{await app.listen({port,host:'127.0.0.1'});console.log(`CasePilot API: http://127.0.0.1:${port}`);}catch(e){console.error(e);process.exitCode=1;}
