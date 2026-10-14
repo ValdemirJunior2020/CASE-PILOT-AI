@@ -33,7 +33,8 @@ async function infer(model,policy,evidence){const controller=new AbortController
  if(!response.ok)throw Error('Ollama HTTP '+response.status);return JSON.parse((await response.json()).response)}finally{clearTimeout(timeout)}}
 export function registerQaAutopilot(app,ctx){
  ctx.db.exec('CREATE TABLE IF NOT EXISTS qa_autopilot (folder TEXT PRIMARY KEY,hash TEXT,caseId TEXT,status TEXT,center TEXT,agent TEXT,callId TEXT,itinerary TEXT,updatedAt TEXT,result TEXT,error TEXT)');
- const root=process.env.QA_CALLS_OUTPUT||DEFAULT_ROOT;const policyRoot=path.resolve(process.cwd(),'local-qa');const model=process.env.CASEPILOT_MODEL||'qwen2.5:7b';
+ const candidates=[process.env.QA_CALLS_OUTPUT,DEFAULT_ROOT,path.join(process.env.USERPROFILE||'', 'Downloads','QA-SYSTEM','NOVO','novo-novo','data','calls'),path.join(process.env.HOMEDRIVE||'C:',process.env.HOMEPATH||'\\Users\\nobody','Downloads','QA-SYSTEM','NOVO','novo-novo','data','calls')].filter(Boolean);
+ const root=candidates.find(p=>fs.existsSync(p)&&fs.statSync(p).isDirectory())||candidates[0];const policyRoot=path.resolve(process.cwd(),'local-qa');const model=process.env.CASEPILOT_MODEL||'qwen2.5:7b';
  let busy=false,lastScan=null,active=null,lastError=null;
  async function scan(){if(busy)return;busy=true;lastScan=now();try{for(const dir of findCases(root)){
  const snap=snapshot(dir);if(!snap)continue;const previous=ctx.db.prepare('SELECT * FROM qa_autopilot WHERE folder=?').get(dir);
